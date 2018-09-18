@@ -21,6 +21,7 @@ parser.add_argument('--hidden_size',action="store",type=int,dest="hidden_size",d
 parser.add_argument('--nmodel',action="store",type=str,dest="nmodel",default='vgg16')
 parser.add_argument('--output_size',action="store",type=int,dest="output_size",default=102)
 parser.add_argument('--dropout', action = "store",type=float,dest ="dropout", default = 0.5)
+parser.add_argument('--gpu',action="store",type=str,dest="gpu",default='on')
 
 parser.add_argument('--epochs',action="store",type=int,dest="epochs",default=3)
 parser.add_argument('--print_every',action="store",type=int,dest="print_every",default=40)
@@ -33,7 +34,8 @@ flower=mango.data_dir
 hidden_size=mango.hidden_size
 nmodel=mango.nmodel
 output_size=mango.output_size
-dropout=mango.dropout
+dropout=mango.dropout 
+gpu=mango.gpu
 
 epochs=mango.epochs
 print_every=mango.print_every
@@ -42,8 +44,8 @@ path=mango.save_dir
 
 trainloader , validloader, testloader,train_data=just.loading(flower)
 
-model, criterion, optimizer=just.setup(nmodel,hidden_size,output_size,dropout)
+model, criterion, optimizer=just.setup(nmodel,hidden_size,output_size,dropout,gpu)
 
-just.training(model,criterion,optimizer,trainloader,validloader,epochs,print_every)
+just.training(model,criterion,optimizer,trainloader,validloader,epochs,print_every,gpu)
 
-just.save_checkpoint(train_data,model,nmodel,path,hidden_size,epochs,dropout,print_every,output_size)
+just.save_checkpoint(train_data,model,nmodel,path)#,hidden_size,epochs,dropout,print_every,output_size

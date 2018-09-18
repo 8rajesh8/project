@@ -10,6 +10,7 @@ from PIL import Image
 import json
 from matplotlib.ticker import FormatStrFormatter
 import argparse
+from collections import OrderedDict
 
 
 def loading(flower= "./flowers"):
@@ -54,7 +55,7 @@ def loading(flower= "./flowers"):
 
 stru={'vgg16':25088,"densenet121":1024}
 
-def setup(nmodel='vgg16',hidden_size= [1000, 200],output_size = 102,dropout=0.5):
+def setup(nmodel='vgg16',hidden_size= [1000, 200],output_size = 102,dropout=0.5,gpu='on'):#added gpu for user
     if nmodel=='vgg16':
         model = models.vgg16(pretrained=True)
 
@@ -75,21 +76,24 @@ def setup(nmodel='vgg16',hidden_size= [1000, 200],output_size = 102,dropout=0.5)
         model.classifier = classifier
         criterion = nn.NLLLoss()
         optimizer = optim.Adam(model.classifier.parameters(), lr=0.001)
-        model.cuda()
-        print("just passed setup!!")
+        if gpu=='on':
+            model.cuda()
+            print("just passed setup!!")
         return model, criterion, optimizer
     
 
-def training(model,criterion,optimizer,trainloader,validloader,epochs = 3,print_every = 40):#might need validloader
+def training(model,criterion,optimizer,trainloader,validloader,epochs = 3,print_every = 40,gpu='on'):#might need validloader
     
     steps = 0
-    model.to('cuda')
+    if gpu=='on':
+        model.to('cuda')
 
     for e in range(epochs):
         running_loss = 0
         for ii, (inputs, labels) in enumerate(trainloader):
             steps += 1
-            inputs, labels = inputs.to('cuda'), labels.to('cuda')
+            if gpu=='on':
+                inputs, labels = inputs.to('cuda'), labels.to('cuda')
             optimizer.zero_grad()
             outputs = model.forward(inputs)
             loss = criterion(outputs, labels)
@@ -106,9 +110,9 @@ def training(model,criterion,optimizer,trainloader,validloader,epochs = 3,print_
                 print("inside training")
                 for ii, (inputs1,labels1) in enumerate(validloader):
                     optimizer.zero_grad()
-
-                    inputs1, labels1 = inputs1.to('cuda:0') , labels1.to('cuda:0')
-                    model.to('cuda:0')
+                    if gpu=='on':
+                        inputs1, labels1 = inputs1.to('cuda:0') , labels1.to('cuda:0')
+                        model.to('cuda:0')
                     with torch.no_grad():
                         #validloss,accuracy=validation_fun(model,testloader,criterion):
                         outputs = model.forward(inputs1)
@@ -125,7 +129,17 @@ def training(model,criterion,optimizer,trainloader,validloader,epochs = 3,print_
                 running_loss = 0
     print("your network has been trained")
 
-def save_checkpoint(train_data,model,nmodel='vgg16',path='checkpoint.pth',hidden_size= [1000, 200],epochs = 3,dropout=0.5,print_every = 40,output_size=102):
+def save_checkpoint(train_data,model,nmodel='vgg16',path='checkpoint.pth'):
+    model.class_to_idx = train_data.class_to_idx
+    model.cpu()
+    checkpoint={'nmodel':'vgg16',
+                'state_dict':model.state_dict(),
+                'class_to_idx':model.class_to_idx}
+    torch.save(checkpoint,path)
+    print("your check point has been saved!!!")
+    
+    
+'''def save_checkpoint(train_data,model,nmodel='vgg16',path='checkpoint.pth',hidden_size= [1000, 200],epochs = 3,dropout=0.5,print_every = 40,output_size=102):
         # TODO: Save the checkpoint 
         model.class_to_idx = train_data.class_to_idx
         checkpoint={'output_size':output_size,
@@ -138,10 +152,34 @@ def save_checkpoint(train_data,model,nmodel='vgg16',path='checkpoint.pth',hidden
                     'state_dict':model.state_dict(),
                     'class_to_idx':model.class_to_idx}
         torch.save(checkpoint,path)#saving checkpoint in 'checkpoint.pth'
-        print("your check point has been saved!!!")    
+        print("your check point has been saved!!!")'''  
 
 # TODO: Write a function that loads a checkpoint and rebuilds the model
 def load_checkpoint(filepath='checkpoint.pth'):
+    checkpoint=torch.load(filepath)
+    
+    if checkpoint['nmodel']=='vgg16':
+        model=models.vgg16(pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
+            
+    model.class_to_idx = checkpoint['class_to_idx']
+    
+    classifier = nn.Sequential(OrderedDict([
+        ('dropout',nn.Dropout(0.5)),
+        ('fc1', nn.Linear(25088,1000)),
+        ('relu1', nn.ReLU()),
+        ('fc2', nn.Linear(1000,200)),
+        ('relu2', nn.ReLU()),
+        ('fc3', nn.Linear(200,102)),
+        ('output', nn.LogSoftmax(dim=1))]))
+            
+    model.classifier=classifier
+    
+    model.load_state_dict(checkpoint['state_dict'])
+    
+    return model
+'''def load_checkpoint(filepath='checkpoint.pth'):
     checkpoint=torch.load(filepath)
     
     hidden_size=checkpoint['hidden_size']
@@ -152,7 +190,7 @@ def load_checkpoint(filepath='checkpoint.pth'):
     model,_,_ = setup(nmodel,hidden_size,output_size,dropout)
     model.class_to_idx = checkpoint['class_to_idx']
     model.load_state_dict(checkpoint['state_dict'])
-    return model
+    return model'''
         
 # TODO: Process a PIL image for use in a PyTorch model
 def process_image(image):#insert path over here
@@ -166,18 +204,49 @@ def process_image(image):#insert path over here
     
     apply=image_fix(im)
     return apply
-	
-	
-def predict(image_path, model, topk=5):   
-    model.to('cuda:0')
+
+def predict(image_path, model,jfile_path='cat_to_name.json',topk=5,gpu='on'):
+    if gpu=='on':
+        model.to('cuda:0')
+    img_torch = process_image(image_path)
+    
+    #img_torch=torch.from_numpy(img_torch).type(torch.FloatTensor) 
+    img_torch = img_torch.unsqueeze_(0)
+    img_torch = img_torch.float()
+    
+    if gpu=='on':
+        with torch.no_grad():
+            output = model.forward(img_torch.cuda())
+    else:
+        with torch.no_grad():
+            output=model.forward(img_torch)
+  
+    probs=F.softmax(output.data,dim=1)
+    top_probs,top_labs = probs.topk(topk)
+    
+    top_probs = top_probs.detach().cpu().numpy().tolist()[0] 
+    top_labs = top_labs.detach().cpu().numpy().tolist()[0]
+    print(top_probs)
+    print(top_labs)
+    idx_to_class = {val: key for key, val in model.class_to_idx.items()}
+    top_labels = [idx_to_class[lab] for lab in top_labs]
+    print(top_labels)
+    top_flowers = [jfile_path[idx_to_class[lab]] for lab in top_labs]
+    
+    return top_probs, top_labels,top_flowers
+'''def predict(image_path, model, topk=5,gpu='on'):
+    if gpu=='on':
+        model.to('cuda:0')
     img_torch = process_image(image_path)
     img_torch = img_torch.unsqueeze_(0)
     img_torch = img_torch.float()
     
-    with torch.no_grad():
-        output = model.forward(img_torch.cuda())
-        
+    if gpu=='on':
+        with torch.no_grad():
+            output = model.forward(img_torch.cuda())
+    else:
+        with torch.no_grad():
+            output=model.forward(img_torch)
     probability = F.softmax(output.data,dim=1)
     
-    return probability.topk(topk)
-
+    return probability.topk(topk)'''
