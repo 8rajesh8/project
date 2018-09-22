@@ -1,3 +1,3 @@
 # project
 image classifier
-![](Udacity Nanodegree Graduation Certificate.pdf)
+![](Udacity%20Nanodegree%20Graduation%20Certificate.pdf)
